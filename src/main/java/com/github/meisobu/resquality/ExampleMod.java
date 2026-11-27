@@ -8,7 +8,6 @@ import net.minecraft.command.CommandException;
 import net.minecraft.command.ICommandSender;
 import net.minecraft.util.ChatComponentText;
 import net.minecraftforge.client.ClientCommandHandler;
-import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.config.Configuration;
 import net.minecraftforge.fml.common.FMLCommonHandler;
 import net.minecraftforge.fml.common.Mod;
@@ -24,50 +23,74 @@ import java.io.File;
 public class ExampleMod {
 
     private static File cfgFile;
-    private static int targetW = 0; // 0 = desligado
+    private static int quality = 100; // 100 = nativo
     private static boolean linear = false;
     private static boolean filterDirty = true;
+
+    // tamanho real da janela, guardado durante o frame
+    private int realW, realH;
+    private boolean overridden = false;
 
     @Mod.EventHandler
     public void preInit(FMLPreInitializationEvent e) {
         cfgFile = e.getSuggestedConfigurationFile();
         Configuration c = new Configuration(cfgFile);
         c.load();
-        targetW = c.getInt("width", "general", 0, 0, 16384, "0 = desligado");
+        quality = c.getInt("quality", "general", 100, 10, 100, "10 a 100 (100 = nativo)");
         linear = c.getBoolean("linear", "general", false, "true = suavizado, false = pixelado");
         c.save();
     }
 
     @Mod.EventHandler
     public void init(FMLInitializationEvent e) {
-        MinecraftForge.EVENT_BUS.register(this);
         FMLCommonHandler.instance().bus().register(this);
         ClientCommandHandler.instance.registerCommand(new RqCommand());
     }
 
     @SubscribeEvent
     public void onRenderTick(TickEvent.RenderTickEvent e) {
-        if (e.phase != TickEvent.Phase.START) return;
-        if (!OpenGlHelper.isFramebufferEnabled()) return;
-
         Minecraft mc = Minecraft.getMinecraft();
-        Framebuffer fb = mc.getFramebuffer();
-        if (fb == null) return;
 
-        int w = mc.displayWidth;
-        int h = mc.displayHeight;
-        if (targetW > 0) {
-            w = targetW;
-            h = Math.max(1, Math.round(targetW * (float) mc.displayHeight / mc.displayWidth));
-        }
+        if (e.phase == TickEvent.Phase.START) {
+            overridden = false;
+            if (!OpenGlHelper.isFramebufferEnabled()) return;
+            Framebuffer fb = mc.getFramebuffer();
+            if (fb == null) return;
 
-        if (fb.framebufferWidth != w || fb.framebufferHeight != h) {
-            fb.createBindFramebuffer(w, h);
-            filterDirty = true;
-        }
-        if (filterDirty) {
-            fb.setFramebufferFilter(linear ? GL11.GL_LINEAR : GL11.GL_NEAREST);
-            filterDirty = false;
+            int rw = mc.displayWidth;
+            int rh = mc.displayHeight;
+
+            // com tela aberta (menu, inventario, chat) usa resolucao nativa
+            boolean reduce = quality < 100 && mc.currentScreen == null;
+            int w = rw;
+            int h = rh;
+            if (reduce) {
+                w = Math.max(64, Math.round(rw * quality / 100f));
+                h = Math.max(64, Math.round(rh * quality / 100f));
+            }
+
+            if (fb.framebufferWidth != w || fb.framebufferHeight != h) {
+                fb.createBindFramebuffer(w, h);
+                filterDirty = true;
+            }
+            if (filterDirty) {
+                fb.setFramebufferFilter(linear ? GL11.GL_LINEAR : GL11.GL_NEAREST);
+                filterDirty = false;
+            }
+
+            if (reduce) {
+                realW = rw;
+                realH = rh;
+                mc.displayWidth = w;
+                mc.displayHeight = h;
+                overridden = true;
+            }
+        } else if (e.phase == TickEvent.Phase.END) {
+            if (overridden) {
+                mc.displayWidth = realW;
+                mc.displayHeight = realH;
+                overridden = false;
+            }
         }
     }
 
@@ -75,7 +98,7 @@ public class ExampleMod {
         if (cfgFile == null) return;
         Configuration c = new Configuration(cfgFile);
         c.load();
-        c.get("general", "width", 0).set(targetW);
+        c.get("general", "quality", 100).set(quality);
         c.get("general", "linear", false).set(linear);
         c.save();
     }
@@ -92,7 +115,7 @@ public class ExampleMod {
 
         @Override
         public String getCommandUsage(ICommandSender sender) {
-            return "/rq <largura>x<altura> | /rq off | /rq linear | /rq nearest";
+            return "/rq <10-100> | /rq off | /rq linear | /rq nearest";
         }
 
         @Override
@@ -108,15 +131,15 @@ public class ExampleMod {
         @Override
         public void processCommand(ICommandSender sender, String[] args) throws CommandException {
             if (args.length == 0) {
-                msg(sender, "Uso: " + getCommandUsage(sender));
+                msg(sender, "Qualidade atual: " + quality + ". Uso: " + getCommandUsage(sender));
                 return;
             }
             String a = args[0].toLowerCase();
 
             if (a.equals("off") || a.equals("reset")) {
-                targetW = 0;
+                quality = 100;
                 save();
-                msg(sender, "Resolucao nativa restaurada.");
+                msg(sender, "Qualidade 100 (nativa).");
             } else if (a.equals("linear")) {
                 linear = true;
                 filterDirty = true;
@@ -127,17 +150,13 @@ public class ExampleMod {
                 filterDirty = true;
                 save();
                 msg(sender, "Filtro: pixelado.");
-            } else if (a.matches("\\d{2,5}x\\d{2,5}")) {
-                String[] p = a.split("x");
-                int w = Integer.parseInt(p[0]);
-                int h = Integer.parseInt(p[1]);
-                if (w < 64 || h < 64 || w > 8192 || h > 8192) {
-                    msg(sender, "Valores fora do limite (64 a 8192).");
-                    return;
-                }
-                targetW = w;
+            } else if (a.matches("\\d{1,3}")) {
+                int q = Integer.parseInt(a);
+                if (q > 100) q = 100;
+                if (q < 10) q = 10; // abaixo de 10 fica injogavel
+                quality = q;
                 save();
-                msg(sender, "Renderizando com largura " + w + " (altura proporcional a tela).");
+                msg(sender, "Qualidade: " + q + (q < 100 ? " (sai da tela aberta = nativa)" : ""));
             } else {
                 msg(sender, "Uso: " + getCommandUsage(sender));
             }
