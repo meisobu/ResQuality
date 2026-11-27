@@ -1,4 +1,4 @@
-package com.example.examplemod;
+package com.github.meisobu.resquality;
 
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.renderer.OpenGlHelper;
@@ -10,6 +10,7 @@ import net.minecraft.util.ChatComponentText;
 import net.minecraftforge.client.ClientCommandHandler;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.common.config.Configuration;
+import net.minecraftforge.fml.common.FMLCommonHandler;
 import net.minecraftforge.fml.common.Mod;
 import net.minecraftforge.fml.common.event.FMLInitializationEvent;
 import net.minecraftforge.fml.common.event.FMLPreInitializationEvent;
@@ -23,7 +24,7 @@ import java.io.File;
 public class ExampleMod {
 
     private static File cfgFile;
-    private static int targetW = 0, targetH = 0; // 0 = desligado
+    private static int targetW = 0; // 0 = desligado
     private static boolean linear = false;
     private static boolean filterDirty = true;
 
@@ -33,7 +34,6 @@ public class ExampleMod {
         Configuration c = new Configuration(cfgFile);
         c.load();
         targetW = c.getInt("width", "general", 0, 0, 16384, "0 = desligado");
-        targetH = c.getInt("height", "general", 0, 0, 16384, "0 = desligado");
         linear = c.getBoolean("linear", "general", false, "true = suavizado, false = pixelado");
         c.save();
     }
@@ -41,25 +41,25 @@ public class ExampleMod {
     @Mod.EventHandler
     public void init(FMLInitializationEvent e) {
         MinecraftForge.EVENT_BUS.register(this);
-        net.minecraftforge.fml.common.FMLCommonHandler.instance().bus().register(this);
+        FMLCommonHandler.instance().bus().register(this);
         ClientCommandHandler.instance.registerCommand(new RqCommand());
     }
 
     @SubscribeEvent
     public void onRenderTick(TickEvent.RenderTickEvent e) {
-        int w = mc.displayWidth;
-int h = mc.displayHeight;
-if (targetW > 0) {
-    w = targetW;
-    h = Math.max(1, Math.round(targetW * (float) mc.displayHeight / mc.displayWidth));
-}
+        if (e.phase != TickEvent.Phase.START) return;
+        if (!OpenGlHelper.isFramebufferEnabled()) return;
 
         Minecraft mc = Minecraft.getMinecraft();
         Framebuffer fb = mc.getFramebuffer();
         if (fb == null) return;
 
-        int w = targetW > 0 ? targetW : mc.displayWidth;
-        int h = targetH > 0 ? targetH : mc.displayHeight;
+        int w = mc.displayWidth;
+        int h = mc.displayHeight;
+        if (targetW > 0) {
+            w = targetW;
+            h = Math.max(1, Math.round(targetW * (float) mc.displayHeight / mc.displayWidth));
+        }
 
         if (fb.framebufferWidth != w || fb.framebufferHeight != h) {
             fb.createBindFramebuffer(w, h);
@@ -76,13 +76,12 @@ if (targetW > 0) {
         Configuration c = new Configuration(cfgFile);
         c.load();
         c.get("general", "width", 0).set(targetW);
-        c.get("general", "height", 0).set(targetH);
         c.get("general", "linear", false).set(linear);
         c.save();
     }
 
     private static void msg(ICommandSender s, String text) {
-        s.addChatMessage(new ChatComponentText("§b[RQ] §f" + text));
+        s.addChatMessage(new ChatComponentText("\u00a7b[RQ] \u00a7f" + text));
     }
 
     public static class RqCommand extends CommandBase {
@@ -116,9 +115,8 @@ if (targetW > 0) {
 
             if (a.equals("off") || a.equals("reset")) {
                 targetW = 0;
-                targetH = 0;
                 save();
-                msg(sender, "Resolução nativa restaurada.");
+                msg(sender, "Resolucao nativa restaurada.");
             } else if (a.equals("linear")) {
                 linear = true;
                 filterDirty = true;
@@ -138,9 +136,8 @@ if (targetW > 0) {
                     return;
                 }
                 targetW = w;
-                targetH = h;
                 save();
-                msg(sender, "Renderizando em " + w + "x" + h + ".");
+                msg(sender, "Renderizando com largura " + w + " (altura proporcional a tela).");
             } else {
                 msg(sender, "Uso: " + getCommandUsage(sender));
             }
