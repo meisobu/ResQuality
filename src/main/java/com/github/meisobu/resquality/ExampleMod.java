@@ -47,8 +47,12 @@ public class ExampleMod {
 
     @SubscribeEvent
     public void onRenderTick(TickEvent.RenderTickEvent e) {
-        if (e.phase != TickEvent.Phase.START) return;
-        if (!OpenGlHelper.isFramebufferEnabled()) return;
+        int w = mc.displayWidth;
+int h = mc.displayHeight;
+if (targetW > 0) {
+    w = targetW;
+    h = Math.max(1, Math.round(targetW * (float) mc.displayHeight / mc.displayWidth));
+}
 
         Minecraft mc = Minecraft.getMinecraft();
         Framebuffer fb = mc.getFramebuffer();
